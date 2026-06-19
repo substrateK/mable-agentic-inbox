@@ -107,21 +107,67 @@ app.all("*", (c) => {
 	});
 });
 
-// Export the Hono app as the default export with an email handler
+
+
+// changed for forwarding all emails to addresses degined in settings-variables
+type ForwardableEmailEvent = {
+  raw: ReadableStream;
+  rawSize: number;
+  from?: string;
+  to?: string;
+  headers?: Headers;
+  canBeForwarded?: boolean;
+  forward?: (rcptTo: string, headers?: Headers) => Promise<unknown>;
+};
+
 export default {
-	fetch: app.fetch,
-	async email(
-		event: { raw: ReadableStream; rawSize: number },
-		env: Env,
-		ctx: ExecutionContext,
-	) {
-		try {
-			await receiveEmail(event, env, ctx);
-		} catch (e) {
-			console.error("Failed to process incoming email:", (e as Error).message, (e as Error).stack);
-			// Re-throw so Cloudflare's email routing can retry delivery or bounce the message.
-			// Swallowing the error would silently drop the email.
-			throw e;
-		}
-	},
+  fetch: app.fetch,
+
+  async email(
+    event: ForwardableEmailEvent,
+    env: Env & { FORWARD_TO_EMAILS?: string },
+    ctx: ExecutionContext,
+  ) {
+    try {
+      const forwardToEmails = (env.FORWARD_TO_EMAILS || "")
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean);
+
+      if (event.forward && event.canBeForwarded !== false && forwardToEmails.length > 0) {
+        ctx.waitUntil(
+          Promise.allSettled(
+            forwardToEmails.map((email) => {
+              const headers = new Headers();
+
+              if (event.to) {
+                headers.set("X-Original-Recipient", event.to);
+              }
+
+              return event.forward!(email, headers);
+            }),
+          ).then((results) => {
+            results.forEach((result, index) => {
+              if (result.status === "rejected") {
+                console.error(
+                  `Forwarding to ${forwardToEmails[index]} failed:`,
+                  result.reason,
+                );
+              }
+            });
+          }),
+        );
+      }
+
+      await receiveEmail(event, env, ctx);
+    } catch (e) {
+      console.error(
+        "Failed to process incoming email:",
+        (e as Error).message,
+        (e as Error).stack,
+      );
+
+      throw e;
+    }
+  },
 };
