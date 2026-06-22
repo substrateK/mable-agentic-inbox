@@ -15,9 +15,9 @@
 		// The worker now fails closed outside local development if Access is not configured.
 		"DOMAINS": "mable.gg",
 		"EMAIL_ADDRESSES": [],
-		// Optional comma-separated list of forwarding recipients. When set, every email
-		// routed to this Worker is sent with the original body and sender/recipient
-		// details in the subject and headers before being stored locally.
+		// Optional comma-separated list of verified Cloudflare Email Routing destination
+		// addresses. When set, every email routed to this Worker is forwarded to each
+		// address before being stored locally.
 		"FORWARD_TO_EMAILS": ""
 	},
 	"send_email": [

@@ -2,17 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import type { Attachment, Address, Email as ParsedEmail } from "postal-mime";
-import { sendEmail, type SendEmailParams } from "../email-sender";
 import type { Env } from "../types";
 
 const FORWARDED_HEADER = "X-Mable-Agentic-Inbox-Forwarded";
 const ORIGINAL_RECIPIENT_HEADER = "X-Original-Recipient";
-const ORIGINAL_SENDER_HEADER = "X-Original-Sender";
 const FORWARD_MARKER_PREFIX = "email-forward-markers";
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
-// Cloudflare Email Service has a 5 MiB send limit; keep margin for headers and MIME encoding.
-const SEND_EMAIL_SOFT_LIMIT_BYTES = 4 * 1024 * 1024;
 
 type ForwardResult = "forwarded" | "skipped";
 
@@ -90,122 +85,10 @@ function assertNoForwardingLoops(message: ForwardableEmailMessage, env: Env, des
 	}
 }
 
-function getMailboxAddress(address: Address | undefined) {
-	return address && "address" in address ? address.address : undefined;
-}
-
-function escapeHtml(value: string) {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
-}
-
-function htmlToText(html: string) {
-	return html
-		.replace(/<style[\s\S]*?<\/style>/gi, " ")
-		.replace(/<script[\s\S]*?<\/script>/gi, " ")
-		.replace(/<br\s*\/?>/gi, "\n")
-		.replace(/<\/p>/gi, "\n\n")
-		.replace(/<[^>]+>/g, " ")
-		.replace(/\n{3,}/g, "\n\n")
-		.replace(/[ \t]{2,}/g, " ")
-		.trim();
-}
-
-function truncateSubject(value: string) {
-	const normalized = value.replace(/\s+/g, " ").trim();
-	return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
-}
-
-function forwardedSubject(message: ForwardableEmailMessage, parsedEmail: ParsedEmail) {
-	const originalSender = getMailboxAddress(parsedEmail.from) || message.from || "unknown sender";
-	const originalSubject = parsedEmail.subject?.trim() || "(no subject)";
-	return truncateSubject(`Fwd from ${originalSender} to ${message.to}: ${originalSubject}`);
-}
-
-function attachmentSize(attachment: Attachment) {
-	if (typeof attachment.content === "string") {
-		if (attachment.encoding === "base64") return Math.ceil((attachment.content.length * 3) / 4);
-		return new TextEncoder().encode(attachment.content).byteLength;
-	}
-	return attachment.content.byteLength;
-}
-
-function bytesToBase64(bytes: Uint8Array) {
-	let binary = "";
-	const chunkSize = 0x8000;
-	for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-		const chunk = bytes.subarray(offset, offset + chunkSize);
-		binary += String.fromCharCode(...chunk);
-	}
-	return btoa(binary);
-}
-
-function attachmentToSendAttachment(attachment: Attachment): NonNullable<SendEmailParams["attachments"]>[number] {
-	const content = typeof attachment.content === "string" && attachment.encoding === "base64"
-		? attachment.content
-		: bytesToBase64(
-			typeof attachment.content === "string"
-				? new TextEncoder().encode(attachment.content)
-				: new Uint8Array(attachment.content),
-		);
-
-	return {
-		content,
-		filename: attachment.filename || "attachment",
-		type: attachment.mimeType,
-		disposition: attachment.disposition === "inline" ? "inline" : "attachment",
-		...(attachment.contentId ? { contentId: attachment.contentId } : {}),
-	};
-}
-
-function estimateBase64Size(attachment: Attachment) {
-	return Math.ceil(attachmentSize(attachment) / 3) * 4;
-}
-
-function attachmentsForForward(
-	parsedEmail: ParsedEmail,
-	html: string,
-	text: string,
-): SendEmailParams["attachments"] | undefined {
-	const attachments = parsedEmail.attachments || [];
-	if (attachments.length === 0) return undefined;
-
-	const estimatedSize =
-		new TextEncoder().encode(html).byteLength +
-		new TextEncoder().encode(text).byteLength +
-		attachments.reduce((total, attachment) => total + estimateBase64Size(attachment), 0);
-
-	if (estimatedSize > SEND_EMAIL_SOFT_LIMIT_BYTES) {
-		return undefined;
-	}
-
-	return attachments.map(attachmentToSendAttachment);
-}
-
-function buildForwardContent(parsedEmail: ParsedEmail) {
-	const text = parsedEmail.text || (parsedEmail.html ? htmlToText(parsedEmail.html) : "") || "(No text body)";
-	const html =
-		parsedEmail.html ||
-		`<pre style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">${escapeHtml(text)}</pre>`;
-
-	return {
-		html,
-		text,
-		attachments: attachmentsForForward(parsedEmail, html, text),
-	};
-}
-
-function forwardHeaders(message: ForwardableEmailMessage, parsedEmail: ParsedEmail): Record<string, string> {
-	const headers: Record<string, string> = {
-		[FORWARDED_HEADER]: "1",
-		[ORIGINAL_RECIPIENT_HEADER]: message.to,
-	};
-	const originalSender = getMailboxAddress(parsedEmail.from) || message.from;
-	if (originalSender) headers[ORIGINAL_SENDER_HEADER] = originalSender;
+function forwardHeaders(message: ForwardableEmailMessage) {
+	const headers = new Headers();
+	headers.set(FORWARDED_HEADER, "1");
+	headers.set(ORIGINAL_RECIPIENT_HEADER, message.to);
 	return headers;
 }
 
@@ -259,7 +142,6 @@ async function forwardOnce(
 	message: ForwardableEmailMessage,
 	env: Env,
 	destination: string,
-	parsedEmail: ParsedEmail,
 ): Promise<ForwardResult> {
 	const markerKey = await forwardMarkerKey(message, destination);
 	const existingMarker = await env.BUCKET.head(markerKey);
@@ -269,28 +151,13 @@ async function forwardOnce(
 		return "skipped";
 	}
 
-	const originalSender = getMailboxAddress(parsedEmail.from) || message.from;
-	const content = buildForwardContent(parsedEmail);
-	await sendEmail(env.EMAIL, {
-		to: destination,
-		from: { email: message.to, name: "Mable Forwarder" },
-		subject: forwardedSubject(message, parsedEmail),
-		html: content.html,
-		text: content.text,
-		replyTo: originalSender && EMAIL_RE.test(originalSender) ? originalSender : undefined,
-		attachments: content.attachments,
-		headers: forwardHeaders(message, parsedEmail),
-	});
+	await message.forward(destination, forwardHeaders(message));
 	await markForwarded(env.BUCKET, markerKey, message, destination);
 
 	return "forwarded";
 }
 
-export async function forwardConfiguredEmail(
-	message: ForwardableEmailMessage,
-	env: Env,
-	parsedEmail: ParsedEmail,
-) {
+export async function forwardConfiguredEmail(message: ForwardableEmailMessage, env: Env) {
 	const destinations = parseForwardToEmails(env.FORWARD_TO_EMAILS);
 
 	if (destinations.length === 0) return;
@@ -298,7 +165,7 @@ export async function forwardConfiguredEmail(
 	assertNoForwardingLoops(message, env, destinations);
 
 	const results = await Promise.allSettled(
-		destinations.map((destination) => forwardOnce(message, env, destination, parsedEmail)),
+		destinations.map((destination) => forwardOnce(message, env, destination)),
 	);
 	const failures = results
 		.map((result, index) => ({ result, destination: destinations[index] }))

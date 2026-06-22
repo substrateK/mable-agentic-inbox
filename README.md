@@ -30,9 +30,9 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 
 ### Optional: forward every inbound email
 
-Set `FORWARD_TO_EMAILS` to a comma-separated list of forwarding recipients. Every email routed to this Worker will be sent with the original body unchanged, while the forwarded subject and headers include the original sender and original receiver.
+Set `FORWARD_TO_EMAILS` to a comma-separated list of Cloudflare Email Routing destination addresses. Every email routed to this Worker will be forwarded to each address before it is stored locally.
 
-Do not point `FORWARD_TO_EMAILS` at an address on a domain routed back to this Worker, or the Worker will reject the configuration to avoid forwarding loops. If your `send_email` binding restricts allowed recipients, include these forwarding recipients in that binding configuration.
+Each destination must be verified in Cloudflare Email Routing first. Do not point `FORWARD_TO_EMAILS` at an address on a domain routed back to this Worker, or the Worker will reject the configuration to avoid forwarding loops.
 
 ### Troubleshooting Access
 

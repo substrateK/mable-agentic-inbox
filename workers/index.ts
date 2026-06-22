@@ -4,7 +4,7 @@
 
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
-import PostalMime, { type Email as ParsedEmail } from "postal-mime";
+import PostalMime from "postal-mime";
 import { z } from "zod";
 import { sendEmail } from "./email-sender";
 import { storeAttachments, type StoredAttachment } from "./lib/attachments";
@@ -345,12 +345,10 @@ async function streamToArrayBuffer(stream: ReadableStream, streamSize: number) {
 	return result;
 }
 
-async function parseIncomingEmail(event: { raw: ReadableStream; rawSize: number }) {
+async function receiveEmail(event: { raw: ReadableStream; rawSize: number }, env: Env, ctx: ExecutionContext) {
 	const rawEmail = await streamToArrayBuffer(event.raw, event.rawSize);
-	return new PostalMime().parse(rawEmail);
-}
+	const parsedEmail = await new PostalMime().parse(rawEmail);
 
-async function receiveParsedEmail(parsedEmail: ParsedEmail, env: Env, ctx: ExecutionContext) {
 	if (!parsedEmail.to?.length || !parsedEmail.to[0].address) throw new Error("received email with empty to");
 
 	const allowedAddresses = ((env.EMAIL_ADDRESSES ?? []) as string[]).map((a) => a.toLowerCase());
@@ -411,9 +409,4 @@ async function receiveParsedEmail(parsedEmail: ParsedEmail, env: Env, ctx: Execu
 	})).catch((e) => console.error("Auto-draft trigger failed:", (e as Error).message)));
 }
 
-async function receiveEmail(event: { raw: ReadableStream; rawSize: number }, env: Env, ctx: ExecutionContext) {
-	const parsedEmail = await parseIncomingEmail(event);
-	await receiveParsedEmail(parsedEmail, env, ctx);
-}
-
-export { app, parseIncomingEmail, receiveEmail, receiveParsedEmail };
+export { app, receiveEmail };

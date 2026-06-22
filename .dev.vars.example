@@ -2,6 +2,6 @@
 POLICY_AUD=your-access-policy-audience-tag
 TEAM_DOMAIN=https://your-team.cloudflareaccess.com
 
-# Optional comma-separated list of forwarding recipients.
-# Every email routed to this Worker is sent with the original body and sender/recipient details in the subject and headers.
+# Optional comma-separated list of verified Cloudflare Email Routing destination addresses.
+# Every email routed to this Worker is forwarded to each address before local storage.
 FORWARD_TO_EMAILS=
