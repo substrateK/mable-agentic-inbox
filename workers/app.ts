@@ -6,7 +6,7 @@ import { routeAgentRequest } from "agents";
 import { Hono } from "hono";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { createRequestHandler } from "react-router";
-import { app as apiApp, receiveEmail } from "./index";
+import { app as apiApp, parseIncomingEmail, receiveParsedEmail } from "./index";
 import { forwardConfiguredEmail } from "./lib/email-forwarding";
 import { EmailMCP } from "./mcp";
 import type { Env } from "./types";
@@ -116,8 +116,9 @@ export default {
 		ctx: ExecutionContext,
 	) {
 		try {
-			await forwardConfiguredEmail(message, env);
-			await receiveEmail(message, env, ctx);
+			const parsedEmail = await parseIncomingEmail(message);
+			await forwardConfiguredEmail(message, env, parsedEmail);
+			await receiveParsedEmail(parsedEmail, env, ctx);
 		} catch (e) {
 			console.error("Failed to process incoming email:", (e as Error).message, (e as Error).stack);
 			// Re-throw so Cloudflare's email routing can retry delivery or bounce the message.
