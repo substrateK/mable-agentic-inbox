@@ -28,6 +28,12 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 4. **Enable Email Service** -- The worker needs the `send_email` binding to send outbound emails. See [Email Service docs](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/)
 5. **Create a mailbox** -- Visit your deployed app and create a mailbox for any address on your domain (e.g. `hello@example.com`)
 
+### Optional: forward every inbound email
+
+Set `FORWARD_TO_EMAILS` to a comma-separated list of Cloudflare Email Routing destination addresses. Every email routed to this Worker will be forwarded to each address before it is stored locally.
+
+Each destination must be verified in Cloudflare Email Routing first. Do not point `FORWARD_TO_EMAILS` at an address on a domain routed back to this Worker, or the Worker will reject the configuration to avoid forwarding loops.
+
 ### Troubleshooting Access
 
 1. If you see `Invalid or expired Access token`, that usually means `POLICY_AUD` or `TEAM_DOMAIN` secrets are incorrect.

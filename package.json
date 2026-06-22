@@ -9,6 +9,9 @@
 		"bindings": {
 			"DOMAINS": {
 				"description": "Your domain with [Email Routing](https://developers.cloudflare.com/email-routing/) enabled (e.g. `example.com`). After deploying, create a catch-all Email Routing rule pointing to this Worker."
+			},
+			"FORWARD_TO_EMAILS": {
+				"description": "Optional comma-separated list of verified Cloudflare Email Routing destination addresses. Every email routed to this Worker is forwarded to each address before local storage."
 			}
 		}
 	},
